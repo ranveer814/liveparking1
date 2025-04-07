@@ -52,4 +52,6 @@ async def detect_parking_slots(file: UploadFile = File(...)):
 # Run the app when called directly
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=10000)
+    import os
+    port = int(os.environ.get("PORT", 10000))  # Render provides PORT as env variable
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
