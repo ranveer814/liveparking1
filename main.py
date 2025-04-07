@@ -2,41 +2,45 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 import cv2
 import numpy as np
-import os
 from ultralytics import YOLO
-import uuid
-import uvicorn
+import os
 
 app = FastAPI()
 
-# Load YOLOv8 model (cars detection)
-model = YOLO("yolov8n.pt")
+# Load the YOLOv8 model
+model = YOLO("yolov8n.pt")  # You can use yolov8s.pt for better accuracy
 
-# Ensure uploads folder exists
+# Ensure uploads directory exists (optional)
 os.makedirs("uploads", exist_ok=True)
+
+@app.get("/")
+def read_root():
+    return {"message": "YOLOv8 Parking Slot Detection API is live!"}
 
 @app.post("/upload-image/")
 async def detect_parking_slots(file: UploadFile = File(...)):
-    # Read image bytes and decode to OpenCV format
+    # Read the uploaded image
     img_bytes = await file.read()
     img_array = np.frombuffer(img_bytes, dtype=np.uint8)
     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-    # Get image dimensions to split into 3 slots (left to right)
-    height, width, _ = img.shape
-    slot_width = width // 3
+    if img is None:
+        return JSONResponse(content={"error": "Invalid image"}, status_code=400)
 
-    # Run YOLOv8 on the image
+    height, width, _ = img.shape
+    slot_width = width // 3  # divide image into 3 vertical parts
+
+    # Run YOLOv8 object detection
     results = model(img)[0]
 
     car_boxes = []
     for box in results.boxes.data.tolist():
         x1, y1, x2, y2, conf, cls = box
-        if int(cls) == 2:  # Class 2 = Car in COCO dataset
+        if int(cls) == 2:  # Class 2 = Car
             center_x = (x1 + x2) / 2
             car_boxes.append(center_x)
 
-    # Initialize slots
+    # Determine which slots are occupied
     slots = {"Slot 1": "Empty", "Slot 2": "Empty", "Slot 3": "Empty"}
     for cx in car_boxes:
         if cx < slot_width:
@@ -48,10 +52,7 @@ async def detect_parking_slots(file: UploadFile = File(...)):
 
     return JSONResponse(content=slots)
 
-
-# Run the app when called directly
+# Entry point for Render or local use
 if __name__ == "__main__":
     import uvicorn
-    import os
-    port = int(os.environ.get("PORT", 10000))  # Render provides PORT as env variable
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000)
