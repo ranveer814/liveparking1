@@ -1,13 +1,11 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ultralytics import YOLO
-import numpy as np
-import cv2
+import uvicorn
 
 app = FastAPI()
 
-# Allow CORS for frontend to communicate
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,38 +13,95 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = YOLO("yolov8n.pt")
+# In-memory slot data store
+slot_status = {
+    "Slot 1": "Empty",
+    "Slot 2": "Empty",
+    "Slot 3": "Empty"
+}
 
-@app.post("/detect")
-async def detect_car(file: UploadFile = File(...)):
-    contents = await file.read()
-    npimg = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+@app.post("/receive")
+async def receive_data(data: dict):
+    global slot_status
+    # Validate and update slots
+    for key in slot_status:
+        if key in data:
+            slot_status[key] = data[key]
+    return {"message": "Data received"}
 
-    height, width, _ = img.shape
-    slot_width = width // 3
+@app.get("/slots")
+async def get_slots():
+    return JSONResponse(content=slot_status)
 
-    results = model(img)[0]
-    car_boxes = []
-    for box in results.boxes.data.tolist():
-        x1, y1, x2, y2, conf, cls = box
-        if int(cls) == 2:  # Class ID for 'car' in COCO
-            center_x = (x1 + x2) / 2
-            car_boxes.append(center_x)
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Parking Slot Status</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 20px;
+                background: #f0f0f0;
+            }
+            h1 {
+                margin-bottom: 20px;
+            }
+            .slots {
+                display: flex;
+                gap: 20px;
+            }
+            .slot {
+                width: 120px;
+                height: 120px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: bold;
+                color: white;
+                font-size: 18px;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            .occupied {
+                background-color: red;
+            }
+            .empty {
+                background-color: green;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Live Parking Slots</h1>
+        <div class="slots">
+            <div id="slot1" class="slot">Slot 1</div>
+            <div id="slot2" class="slot">Slot 2</div>
+            <div id="slot3" class="slot">Slot 3</div>
+        </div>
 
-    # Slot detection
-    slots = {"Slot 1": "Empty", "Slot 2": "Empty", "Slot 3": "Empty"}
-    for cx in car_boxes:
-        if cx < slot_width:
-            slots["Slot 1"] = "Occupied"
-        elif cx < 2 * slot_width:
-            slots["Slot 2"] = "Occupied"
-        else:
-            slots["Slot 3"] = "Occupied"
+        <script>
+            function updateSlots() {
+                fetch("/slots")
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById("slot1").className = "slot " + (data["Slot 1"] === "Occupied" ? "occupied" : "empty");
+                        document.getElementById("slot2").className = "slot " + (data["Slot 2"] === "Occupied" ? "occupied" : "empty");
+                        document.getElementById("slot3").className = "slot " + (data["Slot 3"] === "Occupied" ? "occupied" : "empty");
+                    });
+            }
 
-    return JSONResponse(content=slots)
-
-# For local dev
+            updateSlots();
+            setInterval(updateSlots, 3000);
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000)
